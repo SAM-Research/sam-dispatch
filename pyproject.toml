@@ -1,0 +1,9 @@
+[project]
+name = "sam_dispatcher"
+version = "0.1.0"
+authors = [{ name = "SAM Research" }]
+
+dependencies = ["fastapi", "uvicorn", "pydantic"]
+
+[project.scripts]
+sam-dispatch = "sam_dispatcher.server:main"
