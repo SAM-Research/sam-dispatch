@@ -36,17 +36,15 @@ async def upload(request: Request, report: ClientReport):
 
 def main():
     global state
-    parser = ArgumentParser("sam-dispatch")
-    parser.add_argument("scenario", help="Path to scenario toml")
-    parser.add_argument("-a", "--address", default="127.0.0.1:8080")
-    parser.add_argument("-r", "--reload", action="store_true")
-    args = parser.parse_args()
-    scenario_path: str = args.scenario
-    addr: str = args.address
-    ip, port = addr.split(":")
-
-    state = State(scenario_path)
-
-    uvicorn.run(
-        "sam_dispatcher.server:app", host=ip, port=int(port), reload=args.reload
+    parser = ArgumentParser(
+        "sam-dispatch", description="Automated setup of test clients"
     )
+    parser.add_argument("config", help="Path to config")
+    args = parser.parse_args()
+    config_path: str = args.config
+
+    state = State(config_path)
+
+    ip, port = state.scenario.address.split(":")
+
+    uvicorn.run("sam_dispatcher.server:app", host=ip, port=int(port))
