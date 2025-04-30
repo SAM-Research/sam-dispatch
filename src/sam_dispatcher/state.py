@@ -9,6 +9,7 @@ from pathlib import Path
 
 class Scenario(BaseModel):
     name: str
+    address: str = Field(alias="address", default="127.0.0.1:8080")
     clients: int = Field(alias="clients")
     groups: List[float] = Field(alias="groups")
     tick_millis: int = Field(alias="tickMillis")
