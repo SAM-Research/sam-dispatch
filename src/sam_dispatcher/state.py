@@ -5,6 +5,8 @@ import random
 import math
 import time
 from pathlib import Path
+from asyncio import Lock
+import asyncio
 
 
 class Scenario(BaseModel):
@@ -54,8 +56,13 @@ class ClientReport(BaseModel):
 
 class Report(BaseModel):
     scenario: Scenario
-    clients: dict[str, Client]
-    reports: dict[str, ClientReport]
+    ip_addresses: Dict[str, str] = Field(alias="ipAddresses")
+    clients: Dict[str, Client]
+    reports: Dict[str, ClientReport]
+
+
+class StartInfo(BaseModel):
+    epoch: int = Field()
 
 
 class ReportWriter:
@@ -73,6 +80,7 @@ class FsReportWriter:
 
 class State:
     def __init__(self, scenario: str | Scenario, writer: ReportWriter = None):
+        self.lock = Lock()
         if isinstance(scenario, str):
             with open(scenario, "r") as f:
                 self.scenario = Scenario.model_validate_json(f.read())
@@ -89,15 +97,36 @@ class State:
             raise RuntimeError("Groups must add up to 1")
 
         self.clients: dict[str, Client] = dict()
-        self.create_clients()
-        self.free_clients: set[str] = {c.username for c in self.clients.values()}
+        self.free_clients: set[str] = set()
 
         # ip, username
-        self.ips: dict[str, str] = dict()
+        self.ids: dict[str, str] = dict()
         self.ready_clients: set[str] = set()
-        self.start_time = int(time.time())
 
         self.reports: dict[str, ClientReport] = dict()
+        self.epoch: int = 0
+
+        self.client_counter = 0
+
+    def _reset(self):
+        self.clients = dict()
+        self.free_clients = set()
+        self.ids = dict()
+        self.ready_clients = set()
+
+        self.reports = dict()
+        self.epoch = 0
+
+        self.client_counter = 0
+
+    async def next_client_id(self):
+        id = self.client_counter
+        async with self.lock:
+            self.client_counter += 1
+        return id
+
+    def is_auth(self, ip_id: str):
+        return ip_id in self.ids
 
     @property
     def client_amount(self):
@@ -106,38 +135,54 @@ class State:
     @property
     def clients_ready(self):
         return (
-            all(ip in self.ready_clients for ip in self.ips)
+            all(ip in self.ready_clients for ip in self.ids)
             and len(self.free_clients) == 0
         )
 
-    def ready(self, ip: str):
-        self.ready_clients.add(ip)
-        if self.clients_ready:
-            self.start_time = int(time.time()) + self.scenario.start_epoch
+    @property
+    def all_clients_have_uploaded(self):
+        usernames = set(self.ids.values())
+        return all(user in usernames for user in self.reports)
 
-    def get_client(self, ip: str) -> Optional[Client]:
-        if len(self.free_clients) == 0:
-            return None
-        name = self.free_clients.pop()
-        self.ips[ip] = name
-        return self.clients[name]
+    async def start(self, ip_id: str) -> StartInfo:
+        await self._ready(ip_id)
+        while not self.clients_ready:
+            await asyncio.sleep(0.5)
+        if self.epoch == 0:
+            async with self.lock:
+                self.epoch = int(time.time()) + self.scenario.start_epoch
 
-    def report(self, ip: str, report: ClientReport):
-        username = self.ips[ip]
-        self.reports[username] = report
-        usernames = set(self.ips.values())
-        if not all(user in usernames for user in self.reports):
-            return
-        self.save_report()
+        return StartInfo(epoch=self.epoch)
+
+    async def get_client(self, ip_id: str) -> Optional[Client]:
+        async with self.lock:
+            if len(self.free_clients) == 0:
+                return None
+            name = self.free_clients.pop()
+            self.ids[ip_id] = name
+            return self.clients[name]
+
+    async def report(self, ip_id: str, report: ClientReport):
+        async with self.lock:
+            username = self.ids[ip_id]
+            self.reports[username] = report
 
     def save_report(self):
+        ips = {v: k.split("#")[0] for k, v in self.ids.items()}
         report = Report(
-            scenario=self.scenario, clients=self.clients, reports=self.reports
+            scenario=self.scenario,
+            ipAddresses=ips,
+            clients=self.clients,
+            reports=self.reports,
         )
         self.writer.write(self.scenario.report, report)
 
+    async def _ready(self, ip: str):
+        async with self.lock:
+            self.ready_clients.add(ip)
+
     @staticmethod
-    def init_client(
+    def _init_client(
         username: str,
         msg_range: tuple[int, int],
         send_rate: int,
@@ -155,29 +200,32 @@ class State:
             friends=dict(),
         )
 
-    def create_clients(self):
-        total_clients = self.scenario.clients
-        tick_millis = self.scenario.tick_millis
-        duration_ticks = self.scenario.duration_ticks
-        clients = dict()
+    async def init_state(self):
+        async with self.lock:
+            self._reset()
+            total_clients = self.scenario.clients
+            tick_millis = self.scenario.tick_millis
+            duration_ticks = self.scenario.duration_ticks
+            clients = dict()
 
-        # initialize clients
-        for _ in range(total_clients):
-            username = str(uuid.uuid4())
-            msg_range, send_rate = self.get_sizes_and_rate()
-            clients[username] = State.init_client(
-                username,
-                msg_range,
-                send_rate,
-                tick_millis,
-                duration_ticks,
-                self.scenario.denim_probability,
-            )
+            # initialize clients
+            for _ in range(total_clients):
+                username = str(uuid.uuid4())
+                msg_range, send_rate = self._get_sizes_and_rate()
+                clients[username] = State._init_client(
+                    username,
+                    msg_range,
+                    send_rate,
+                    tick_millis,
+                    duration_ticks,
+                    self.scenario.denim_probability,
+                )
 
-        self.clients = clients
-        self.make_friends(self.clients)
+            self.clients = clients
+            self._make_friends(self.clients)
+            self.free_clients: set[str] = {c.username for c in self.clients.values()}
 
-    def make_friends(self, clients: dict[str, Client]):
+    def _make_friends(self, clients: dict[str, Client]):
         names = set(clients.keys())
         client_amount = len(names)
         groups: list[list[str]] = []
@@ -229,7 +277,7 @@ class State:
             for freq, friend in zip(frequencies, client.friends.values()):
                 friend.frequency = freq
 
-    def get_sizes_and_rate(self):
+    def _get_sizes_and_rate(self):
         min_rate, max_rate = self.scenario.send_rate_range
 
         send_rate = random.randint(min_rate, max_rate)
