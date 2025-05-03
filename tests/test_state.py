@@ -20,12 +20,9 @@ scenarios = [
 def test_can_get_client(scenario: Scenario):
     state = State(scenario)
 
-    client = state.get_client("127.0.0.1:44444")
-    denim_prob = state.scenario.denim_probability
+    client = state.get_client("127.0.0.1")
 
-    denim_friends = filter(
-        lambda x: x.denim_probability != 0.0, client.friends.values()
-    )
+    denim_friends = filter(lambda x: x.denim, client.friends.values())
     assert client is not None
     assert client.duration_ticks == state.scenario.duration_ticks
     assert client.tick_millis == state.scenario.tick_millis
@@ -35,7 +32,7 @@ def test_can_get_client(scenario: Scenario):
         <= state.scenario.send_rate_range[1]
     )
 
-    assert all(f.denim_probability == denim_prob for f in denim_friends)
+    assert all(f.denim for f in denim_friends)
 
 
 @pytest.mark.parametrize("scenario", scenarios)
@@ -46,7 +43,7 @@ def test_groups_have_denim_connection(scenario: Scenario):
     count = 0
     for c in state.clients.values():
         for f in c.friends.values():
-            if f.denim_probability != 0.0:
+            if f.denim:
                 count += 1
     assert count == groups
 

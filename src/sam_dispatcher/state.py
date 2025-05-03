@@ -24,7 +24,7 @@ class Scenario(BaseModel):
 class Friend(BaseModel):
     username: str = Field()
     frequency: float = Field()
-    denim_probability: float = Field(alias="denimProbability")
+    denim: bool = Field()
 
 
 class Client(BaseModel):
@@ -33,6 +33,7 @@ class Client(BaseModel):
     send_rate: int = Field(alias="sendRate")
     tick_millis: int = Field(alias="tickMillis")
     duration_ticks: int = Field(alias="durationTicks")
+    denim_probability: float = Field(alias="denimProbability")
     friends: Dict[str, Friend]
 
 
@@ -142,6 +143,7 @@ class State:
         send_rate: int,
         tick_millis: int,
         duration_ticks: int,
+        denim_prob: float,
     ):
         return Client(
             username=username,
@@ -149,6 +151,7 @@ class State:
             sendRate=send_rate,
             tickMillis=tick_millis,
             durationTicks=duration_ticks,
+            denimProbability=denim_prob,
             friends=dict(),
         )
 
@@ -168,6 +171,7 @@ class State:
                 send_rate,
                 tick_millis,
                 duration_ticks,
+                self.scenario.denim_probability,
             )
 
         self.clients = clients
@@ -206,13 +210,13 @@ class State:
         for name, group in friends.items():
             for friend in group:
                 clients[name].friends[friend] = Friend(
-                    username=friend, denimProbability=0.0, frequency=0
+                    username=friend, denim=False, frequency=0
                 )
 
         for name, friend_name in denim_pairs.items():
             friend = Friend(
                 username=friend_name,
-                denimProbability=self.scenario.denim_probability,
+                denim=True,
                 frequency=0,
             )
             clients[name].friends[friend_name] = friend
