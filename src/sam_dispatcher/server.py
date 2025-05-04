@@ -51,6 +51,11 @@ async def upload(request: Request, report: ClientReport):
     state.save_report()
 
 
+@app.get("/health")
+async def health():
+    return "OK"
+
+
 async def setup_state(path: str):
     global state
     state = State(path)
