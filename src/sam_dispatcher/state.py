@@ -11,6 +11,7 @@ import asyncio
 
 class Scenario(BaseModel):
     name: str
+    type: str = Field()
     address: str = Field(alias="address", default="127.0.0.1:8080")
     clients: int = Field(alias="clients")
     groups: List[float] = Field(alias="groups")
@@ -19,7 +20,6 @@ class Scenario(BaseModel):
     message_size_range: Tuple[int, int] = Field(alias="messageSizeRange")
     denim_probability: float = Field(alias="denimProbability")
     send_rate_range: Tuple[int, int] = Field(alias="sendRateRange")
-    start_epoch: int = Field(alias="startEpoch", default=10)
     report: str = Field(alias="report", default="report.json")
 
 
@@ -31,6 +31,7 @@ class Friend(BaseModel):
 
 class Client(BaseModel):
     username: str = Field()
+    client_type: str = Field(alias="clientType")
     message_size_range: Tuple[int, int] = Field(alias="messageSizeRange")
     send_rate: int = Field(alias="sendRate")
     tick_millis: int = Field(alias="tickMillis")
@@ -40,18 +41,22 @@ class Client(BaseModel):
 
 
 class MessageLog(BaseModel):
-    type: str = Field()  # denim, regular, status, other protocol
-    to: str = Field()  # server or username
+    type: str = Field()  # denim, regular
+    to: str = Field()
     from_: str = Field(alias="from")
     size: int = Field()
-    timestamp: int = Field()
+    tick: int = Field()
 
     model_config = {"populate_by_name": True}
 
 
 class ClientReport(BaseModel):
-    websocket_port: int = Field(alias="websocketPort")
+    start_time: int = Field(alias="startTime")
     messages: List[MessageLog]
+
+
+class AccountId(BaseModel):
+    account_id: str = Field(alias="accountId")
 
 
 class Report(BaseModel):
@@ -62,7 +67,7 @@ class Report(BaseModel):
 
 
 class StartInfo(BaseModel):
-    epoch: int = Field()
+    friends: dict[str, str] = Field()
 
 
 class ReportWriter:
@@ -75,7 +80,7 @@ class FsReportWriter:
         _dir = Path("reports/")
         _dir.mkdir(exist_ok=True)
         with open(_dir / path, "w") as f:
-            f.write(report.model_dump_json(indent=2))
+            f.write(report.model_dump_json(indent=2, by_alias=True))
 
 
 class State:
@@ -100,22 +105,22 @@ class State:
         self.free_clients: set[str] = set()
 
         # ip, username
-        self.ids: dict[str, str] = dict()
+        self.usernames: dict[str, str] = dict()
         self.ready_clients: set[str] = set()
+        # username, account_id
+        self.account_ids: dict[str, str] = dict()
 
         self.reports: dict[str, ClientReport] = dict()
-        self.epoch: int = 0
 
         self.client_counter = 0
 
     def _reset(self):
         self.clients = dict()
         self.free_clients = set()
-        self.ids = dict()
+        self.usernames = dict()
         self.ready_clients = set()
 
         self.reports = dict()
-        self.epoch = 0
 
         self.client_counter = 0
 
@@ -126,7 +131,7 @@ class State:
         return id
 
     def is_auth(self, ip_id: str):
-        return ip_id in self.ids
+        return ip_id in self.usernames
 
     @property
     def client_amount(self):
@@ -135,40 +140,46 @@ class State:
     @property
     def clients_ready(self):
         return (
-            all(ip in self.ready_clients for ip in self.ids)
+            all(ip in self.ready_clients for ip in self.usernames)
+            and all(user in self.account_ids for user in self.usernames.values())
             and len(self.free_clients) == 0
         )
 
     @property
     def all_clients_have_uploaded(self):
-        usernames = set(self.ids.values())
+        usernames = set(self.usernames.values())
         return all(user in usernames for user in self.reports)
+
+    async def set_account_id(self, ip_id: str, account_id: AccountId):
+        async with self.lock:
+            username = self.usernames[ip_id]
+            self.account_ids[username] = account_id
 
     async def start(self, ip_id: str) -> StartInfo:
         await self._ready(ip_id)
         while not self.clients_ready:
             await asyncio.sleep(0.5)
-        if self.epoch == 0:
-            async with self.lock:
-                self.epoch = int(time.time()) + self.scenario.start_epoch
 
-        return StartInfo(epoch=self.epoch)
+        friends = self.clients[self.usernames[ip_id]].friends
+        friends = dict(map(lambda x: (x[0], self.account_ids[x[0]]), friends.items()))
+
+        return StartInfo(friends=friends)
 
     async def get_client(self, ip_id: str) -> Optional[Client]:
         async with self.lock:
             if len(self.free_clients) == 0:
                 return None
             name = self.free_clients.pop()
-            self.ids[ip_id] = name
+            self.usernames[ip_id] = name
             return self.clients[name]
 
     async def report(self, ip_id: str, report: ClientReport):
         async with self.lock:
-            username = self.ids[ip_id]
+            username = self.usernames[ip_id]
             self.reports[username] = report
 
     def save_report(self):
-        ips = {v: k.split("#")[0] for k, v in self.ids.items()}
+        ips = {v: k.split("#")[0] for k, v in self.usernames.items()}
         report = Report(
             scenario=self.scenario,
             ipAddresses=ips,
@@ -184,6 +195,7 @@ class State:
     @staticmethod
     def _init_client(
         username: str,
+        client_type: str,
         msg_range: tuple[int, int],
         send_rate: int,
         tick_millis: int,
@@ -192,6 +204,7 @@ class State:
     ):
         return Client(
             username=username,
+            clientType=client_type,
             messageSizeRange=msg_range,
             sendRate=send_rate,
             tickMillis=tick_millis,
@@ -214,6 +227,7 @@ class State:
                 msg_range, send_rate = self._get_sizes_and_rate()
                 clients[username] = State._init_client(
                     username,
+                    self.scenario.type,
                     msg_range,
                     send_rate,
                     tick_millis,
@@ -282,7 +296,12 @@ class State:
 
         send_rate = random.randint(min_rate, max_rate)
         # normalized range [0, 1]
-        norm_rate = (send_rate - min_rate) / (max_rate - min_rate)
+        dividend = send_rate - min_rate
+        divisor = max_rate - min_rate
+        if divisor == 0:
+            norm_rate = 1
+        else:
+            norm_rate = dividend / divisor
 
         min_size, max_size = self.scenario.message_size_range
 

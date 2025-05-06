@@ -1,5 +1,12 @@
 import pytest
-from sam_dispatcher.state import State, Scenario, Report, ClientReport, MessageLog
+from sam_dispatcher.state import (
+    State,
+    Scenario,
+    Report,
+    ClientReport,
+    MessageLog,
+    StartInfo,
+)
 import math
 import time
 import asyncio
@@ -7,6 +14,7 @@ import asyncio
 scenarios = [
     Scenario(
         name="test",
+        type="denim-on-sam",
         clients=10,
         groups=[0.5, 0.5],
         tickMillis=10,
@@ -106,23 +114,21 @@ async def test_ready_to_save(scenario: Scenario):
         ip = str(i)
         client = await state.get_client(ip)
         clients.append((ip, client.username))
+        await state.set_account_id(ip, f"account_{ip}")
         starts.append(state.start(ip))
 
-    results = await asyncio.gather(*starts)
-    assert all(10 <= r.epoch - start_time for r in results)
+    await asyncio.gather(*starts)
 
     expected_report = Report(
         scenario=scenario,
-        ipAddresses={v: k for k, v in state.ids.items()},
+        ipAddresses={v: k for k, v in state.usernames.items()},
         clients=state.clients,
         reports=dict(),
     )
     for ip, user in clients:
         report = ClientReport(
-            websocketPort=43434,
-            messages=[
-                MessageLog(type="regular", to="x", from_="x", size=1, timestamp=10)
-            ],
+            startTime=0,
+            messages=[MessageLog(type="regular", to="x", from_="x", size=1, tick=10)],
         )
         expected_report.reports[user] = report
         await state.report(ip, report)

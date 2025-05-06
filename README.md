@@ -21,6 +21,7 @@ options:
 {
   "name": "Example Scenario", // name of scenario
   "address": "127.0.0.1:8080", // port to run dispatcher on
+  "type": "sam", // whether to use sam or denim infrastructure (valid: sam, denim)
   "clients": 1, // how many clients to register
   /* How many groups of clients that should communicate.
    Each group has at least one denim client that communicates with a denim client from another group.

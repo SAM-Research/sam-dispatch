@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from argparse import ArgumentParser
 import uvicorn
-from .state import State, ClientReport
+from .state import State, ClientReport, AccountId
 from fastapi import Request, Response, HTTPException
 import asyncio
 
@@ -36,8 +36,14 @@ async def client(request: Request, response: Response):
     return client_data
 
 
-@app.get("/start")
-async def start(request: Request):
+@app.post("/id")
+async def upload_id(request: Request, account_id: AccountId):
+    _id = auth(request)
+    await state.set_account_id(_id, account_id.account_id)
+
+
+@app.get("/sync")
+async def sync(request: Request):
     return await state.start(auth(request))
 
 
