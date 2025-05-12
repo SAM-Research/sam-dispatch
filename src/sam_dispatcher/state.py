@@ -5,10 +5,13 @@ import random
 import math
 import time
 from pathlib import Path
+from asyncio import Lock
+import asyncio
 
 
 class Scenario(BaseModel):
     name: str
+    type: str = Field()
     address: str = Field(alias="address", default="127.0.0.1:8080")
     clients: int = Field(alias="clients")
     groups: List[float] = Field(alias="groups")
@@ -17,7 +20,6 @@ class Scenario(BaseModel):
     message_size_range: Tuple[int, int] = Field(alias="messageSizeRange")
     denim_probability: float = Field(alias="denimProbability")
     send_rate_range: Tuple[int, int] = Field(alias="sendRateRange")
-    start_epoch: int = Field(alias="startEpoch", default=10)
     report: str = Field(alias="report", default="report.json")
 
 
@@ -29,6 +31,7 @@ class Friend(BaseModel):
 
 class Client(BaseModel):
     username: str = Field()
+    client_type: str = Field(alias="clientType")
     message_size_range: Tuple[int, int] = Field(alias="messageSizeRange")
     send_rate: int = Field(alias="sendRate")
     tick_millis: int = Field(alias="tickMillis")
@@ -38,24 +41,33 @@ class Client(BaseModel):
 
 
 class MessageLog(BaseModel):
-    type: str = Field()  # denim, regular, status, other protocol
-    to: str = Field()  # server or username
+    type: str = Field()  # denim, regular
+    to: str = Field()
     from_: str = Field(alias="from")
     size: int = Field()
-    timestamp: int = Field()
+    tick: int = Field()
 
     model_config = {"populate_by_name": True}
 
 
 class ClientReport(BaseModel):
-    websocket_port: int = Field(alias="websocketPort")
+    start_time: int = Field(alias="startTime")
     messages: List[MessageLog]
+
+
+class AccountId(BaseModel):
+    account_id: str = Field(alias="accountId")
 
 
 class Report(BaseModel):
     scenario: Scenario
-    clients: dict[str, Client]
-    reports: dict[str, ClientReport]
+    ip_addresses: Dict[str, str] = Field(alias="ipAddresses")
+    clients: Dict[str, Client]
+    reports: Dict[str, ClientReport]
+
+
+class StartInfo(BaseModel):
+    friends: dict[str, str] = Field()
 
 
 class ReportWriter:
@@ -68,11 +80,12 @@ class FsReportWriter:
         _dir = Path("reports/")
         _dir.mkdir(exist_ok=True)
         with open(_dir / path, "w") as f:
-            f.write(report.model_dump_json(indent=2))
+            f.write(report.model_dump_json(indent=2, by_alias=True))
 
 
 class State:
     def __init__(self, scenario: str | Scenario, writer: ReportWriter = None):
+        self.lock = Lock()
         if isinstance(scenario, str):
             with open(scenario, "r") as f:
                 self.scenario = Scenario.model_validate_json(f.read())
@@ -89,15 +102,36 @@ class State:
             raise RuntimeError("Groups must add up to 1")
 
         self.clients: dict[str, Client] = dict()
-        self.create_clients()
-        self.free_clients: set[str] = {c.username for c in self.clients.values()}
+        self.free_clients: set[str] = set()
 
         # ip, username
-        self.ips: dict[str, str] = dict()
+        self.usernames: dict[str, str] = dict()
         self.ready_clients: set[str] = set()
-        self.start_time = int(time.time())
+        # username, account_id
+        self.account_ids: dict[str, str] = dict()
 
         self.reports: dict[str, ClientReport] = dict()
+
+        self.client_counter = 0
+
+    def _reset(self):
+        self.clients = dict()
+        self.free_clients = set()
+        self.usernames = dict()
+        self.ready_clients = set()
+
+        self.reports = dict()
+
+        self.client_counter = 0
+
+    async def next_client_id(self):
+        id = self.client_counter
+        async with self.lock:
+            self.client_counter += 1
+        return id
+
+    def is_auth(self, ip_id: str):
+        return ip_id in self.usernames
 
     @property
     def client_amount(self):
@@ -106,39 +140,62 @@ class State:
     @property
     def clients_ready(self):
         return (
-            all(ip in self.ready_clients for ip in self.ips)
+            all(ip in self.ready_clients for ip in self.usernames)
+            and all(user in self.account_ids for user in self.usernames.values())
             and len(self.free_clients) == 0
         )
 
-    def ready(self, ip: str):
-        self.ready_clients.add(ip)
-        if self.clients_ready:
-            self.start_time = int(time.time()) + self.scenario.start_epoch
+    @property
+    def all_clients_have_uploaded(self):
+        usernames = set(self.usernames.values())
+        return all(user in usernames for user in self.reports)
 
-    def get_client(self, ip: str) -> Optional[Client]:
-        if len(self.free_clients) == 0:
-            return None
-        name = self.free_clients.pop()
-        self.ips[ip] = name
-        return self.clients[name]
+    async def set_account_id(self, ip_id: str, account_id: AccountId):
+        async with self.lock:
+            username = self.usernames[ip_id]
+            self.account_ids[username] = account_id
 
-    def report(self, ip: str, report: ClientReport):
-        username = self.ips[ip]
-        self.reports[username] = report
-        usernames = set(self.ips.values())
-        if not all(user in usernames for user in self.reports):
-            return
-        self.save_report()
+    async def start(self, ip_id: str) -> StartInfo:
+        await self._ready(ip_id)
+        while not self.clients_ready:
+            await asyncio.sleep(0.5)
+
+        friends = self.clients[self.usernames[ip_id]].friends
+        friends = dict(map(lambda x: (x[0], self.account_ids[x[0]]), friends.items()))
+
+        return StartInfo(friends=friends)
+
+    async def get_client(self, ip_id: str) -> Optional[Client]:
+        async with self.lock:
+            if len(self.free_clients) == 0:
+                return None
+            name = self.free_clients.pop()
+            self.usernames[ip_id] = name
+            return self.clients[name]
+
+    async def report(self, ip_id: str, report: ClientReport):
+        async with self.lock:
+            username = self.usernames[ip_id]
+            self.reports[username] = report
 
     def save_report(self):
+        ips = {v: k.split("#")[0] for k, v in self.usernames.items()}
         report = Report(
-            scenario=self.scenario, clients=self.clients, reports=self.reports
+            scenario=self.scenario,
+            ipAddresses=ips,
+            clients=self.clients,
+            reports=self.reports,
         )
         self.writer.write(self.scenario.report, report)
 
+    async def _ready(self, ip: str):
+        async with self.lock:
+            self.ready_clients.add(ip)
+
     @staticmethod
-    def init_client(
+    def _init_client(
         username: str,
+        client_type: str,
         msg_range: tuple[int, int],
         send_rate: int,
         tick_millis: int,
@@ -147,6 +204,7 @@ class State:
     ):
         return Client(
             username=username,
+            clientType=client_type,
             messageSizeRange=msg_range,
             sendRate=send_rate,
             tickMillis=tick_millis,
@@ -155,29 +213,33 @@ class State:
             friends=dict(),
         )
 
-    def create_clients(self):
-        total_clients = self.scenario.clients
-        tick_millis = self.scenario.tick_millis
-        duration_ticks = self.scenario.duration_ticks
-        clients = dict()
+    async def init_state(self):
+        async with self.lock:
+            self._reset()
+            total_clients = self.scenario.clients
+            tick_millis = self.scenario.tick_millis
+            duration_ticks = self.scenario.duration_ticks
+            clients = dict()
 
-        # initialize clients
-        for _ in range(total_clients):
-            username = str(uuid.uuid4())
-            msg_range, send_rate = self.get_sizes_and_rate()
-            clients[username] = State.init_client(
-                username,
-                msg_range,
-                send_rate,
-                tick_millis,
-                duration_ticks,
-                self.scenario.denim_probability,
-            )
+            # initialize clients
+            for _ in range(total_clients):
+                username = str(uuid.uuid4())
+                msg_range, send_rate = self._get_sizes_and_rate()
+                clients[username] = State._init_client(
+                    username,
+                    self.scenario.type,
+                    msg_range,
+                    send_rate,
+                    tick_millis,
+                    duration_ticks,
+                    self.scenario.denim_probability,
+                )
 
-        self.clients = clients
-        self.make_friends(self.clients)
+            self.clients = clients
+            self._make_friends(self.clients)
+            self.free_clients: set[str] = {c.username for c in self.clients.values()}
 
-    def make_friends(self, clients: dict[str, Client]):
+    def _make_friends(self, clients: dict[str, Client]):
         names = set(clients.keys())
         client_amount = len(names)
         groups: list[list[str]] = []
@@ -229,12 +291,17 @@ class State:
             for freq, friend in zip(frequencies, client.friends.values()):
                 friend.frequency = freq
 
-    def get_sizes_and_rate(self):
+    def _get_sizes_and_rate(self):
         min_rate, max_rate = self.scenario.send_rate_range
 
         send_rate = random.randint(min_rate, max_rate)
         # normalized range [0, 1]
-        norm_rate = (send_rate - min_rate) / (max_rate - min_rate)
+        dividend = send_rate - min_rate
+        divisor = max_rate - min_rate
+        if divisor == 0:
+            norm_rate = 1
+        else:
+            norm_rate = dividend / divisor
 
         min_size, max_size = self.scenario.message_size_range
 

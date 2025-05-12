@@ -3,7 +3,10 @@ name = "sam_dispatcher"
 version = "0.1.0"
 authors = [{ name = "SAM Research" }]
 
-dependencies = ["fastapi", "uvicorn", "pydantic"]
+dependencies = ["fastapi", "uvicorn", "pydantic", "asyncio"]
 
 [project.scripts]
 sam-dispatch = "sam_dispatcher.server:main"
+
+[project.optional-dependencies]
+test = ["pytest", "pytest-asyncio"]
