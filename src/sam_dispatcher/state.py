@@ -22,6 +22,7 @@ class Scenario(BaseModel):
     send_rate_range: Tuple[int, int] = Field(alias="sendRateRange")
     reply_rate_range: Tuple[int, int] = Field(alias="replyRateRange")
     reply_probability: tuple[float, float] = Field(alias="replyProbability")
+    stale_reply: int = Field(alias="staleReply")
     report: str = Field(alias="report", default="report.json")
 
 
@@ -41,6 +42,7 @@ class Client(BaseModel):
     duration_ticks: int = Field(alias="durationTicks")
     denim_probability: float = Field(alias="denimProbability")
     reply_probability: float = Field(alias="replyProbability")
+    stale_reply: int = Field(alias="staleReply")
     friends: Dict[str, Friend]
 
 
@@ -207,6 +209,7 @@ class State:
         denim_prob: float,
         reply_prob: float,
         reply_rate: int,
+        stale_reply: int,
     ):
         return Client(
             username=username,
@@ -218,6 +221,7 @@ class State:
             denimProbability=denim_prob,
             replyProbability=reply_prob,
             replyRate=reply_rate,
+            staleReply=stale_reply,
             friends=dict(),
         )
 
@@ -245,6 +249,7 @@ class State:
                     self.scenario.denim_probability,
                     reply_prob=reply_prob,
                     reply_rate=reply_rate,
+                    stale_reply=self.scenario.stale_reply,
                 )
 
             self.clients = clients
