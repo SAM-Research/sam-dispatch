@@ -22,6 +22,9 @@ scenarios = [
         messageSizeRange=(10, 20),
         denimProbability=0.1,
         sendRateRange=(1, 5),
+        replyRateRange=(1, 2),
+        replyProbability=(0.5, 0.95),
+        staleReplyRange=(1, 1),
     ),
 ]
 
