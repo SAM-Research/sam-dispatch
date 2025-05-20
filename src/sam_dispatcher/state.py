@@ -22,7 +22,7 @@ class Scenario(BaseModel):
     send_rate_range: Tuple[int, int] = Field(alias="sendRateRange")
     reply_rate_range: Tuple[int, int] = Field(alias="replyRateRange")
     reply_probability: tuple[float, float] = Field(alias="replyProbability")
-    stale_reply: int = Field(alias="staleReply")
+    stale_reply_range: tuple[int, int] = Field(alias="staleReplyRange")
     report: str = Field(alias="report", default="report.json")
 
 
@@ -238,6 +238,7 @@ class State:
                 username = str(uuid.uuid4())
                 msg_range, send_rate = self._get_sizes_and_rate()
                 reply_rate = random.randint(*self.scenario.reply_rate_range)
+                stale_reply = random.randint(*self.scenario.stale_reply_range)
                 reply_prob = random.uniform(*self.scenario.reply_probability)
                 clients[username] = State._init_client(
                     username,
@@ -249,7 +250,7 @@ class State:
                     self.scenario.denim_probability,
                     reply_prob=reply_prob,
                     reply_rate=reply_rate,
-                    stale_reply=self.scenario.stale_reply,
+                    stale_reply=stale_reply,
                 )
 
             self.clients = clients

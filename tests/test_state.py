@@ -24,7 +24,7 @@ scenarios = [
         sendRateRange=(1, 5),
         replyRateRange=(1, 2),
         replyProbability=(0.5, 0.95),
-        staleReply=1,
+        staleReplyRange=(1, 1),
     ),
 ]
 
