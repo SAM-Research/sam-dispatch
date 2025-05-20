@@ -50,11 +50,8 @@ async def sync(request: Request):
 @app.post("/upload")
 async def upload(request: Request, report: ClientReport):
     _id = auth(request)
-    await state.report(_id, report)
-
-    if not state.all_clients_have_uploaded:
-        return
-    state.save_report()
+    if await state.report(_id, report):
+        state.save_report()
 
 
 @app.get("/health")

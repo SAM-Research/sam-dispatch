@@ -183,6 +183,7 @@ class State:
         async with self.lock:
             username = self.usernames[ip_id]
             self.reports[username] = report
+            return self.all_clients_have_uploaded
 
     def save_report(self):
         ips = {v: k.split("#")[0] for k, v in self.usernames.items()}
