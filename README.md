@@ -35,8 +35,9 @@ options:
   "durationTicks": 500, // time of experiment
   "messageSizeRange": [200, 500], // the size range clients will be sending messages in
   "denimProbability": 1, // how probable a client will be to send a denim message
+  "replyProbability": [0.5, 0.95], // how probable a client will be to reply to a message
   "sendRateRange": [1, 5], // how fast a client will send a message, each client gets a random send rate, faster send rate will have less data in the messages and vice versa
-  "startEpoch": 10, // seconds to start, when all clients are ready
+  "replyRateRange": [1, 2], // how fast a client will reply to a message
   "report": "report.json" // final report is saved to report/<name>.json
 }
 ```

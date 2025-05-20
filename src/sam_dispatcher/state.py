@@ -20,6 +20,8 @@ class Scenario(BaseModel):
     message_size_range: Tuple[int, int] = Field(alias="messageSizeRange")
     denim_probability: float = Field(alias="denimProbability")
     send_rate_range: Tuple[int, int] = Field(alias="sendRateRange")
+    reply_rate_range: Tuple[int, int] = Field(alias="replyRateRange")
+    reply_probability: tuple[float, float] = Field(alias="replyProbability")
     report: str = Field(alias="report", default="report.json")
 
 
@@ -34,9 +36,11 @@ class Client(BaseModel):
     client_type: str = Field(alias="clientType")
     message_size_range: Tuple[int, int] = Field(alias="messageSizeRange")
     send_rate: int = Field(alias="sendRate")
+    reply_rate: int = Field(alias="replyRate")
     tick_millis: int = Field(alias="tickMillis")
     duration_ticks: int = Field(alias="durationTicks")
     denim_probability: float = Field(alias="denimProbability")
+    reply_probability: float = Field(alias="replyProbability")
     friends: Dict[str, Friend]
 
 
@@ -201,6 +205,8 @@ class State:
         tick_millis: int,
         duration_ticks: int,
         denim_prob: float,
+        reply_prob: float,
+        reply_rate: int,
     ):
         return Client(
             username=username,
@@ -210,6 +216,8 @@ class State:
             tickMillis=tick_millis,
             durationTicks=duration_ticks,
             denimProbability=denim_prob,
+            replyProbability=reply_prob,
+            replyRate=reply_rate,
             friends=dict(),
         )
 
@@ -225,6 +233,8 @@ class State:
             for _ in range(total_clients):
                 username = str(uuid.uuid4())
                 msg_range, send_rate = self._get_sizes_and_rate()
+                reply_rate = random.randint(*self.scenario.reply_rate_range)
+                reply_prob = random.uniform(*self.scenario.reply_probability)
                 clients[username] = State._init_client(
                     username,
                     self.scenario.type,
@@ -233,6 +243,8 @@ class State:
                     tick_millis,
                     duration_ticks,
                     self.scenario.denim_probability,
+                    reply_prob=reply_prob,
+                    reply_rate=reply_rate,
                 )
 
             self.clients = clients
