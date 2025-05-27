@@ -139,7 +139,7 @@ async def test_ready_to_save(scenario: Scenario):
         )
         expected_report.reports[user] = report
         await state.report(ip, report)
-    await state.save_report()
+
     report = writer.report
     assert report is not None
     assert report == expected_report

@@ -122,6 +122,7 @@ class State:
         self.reports: dict[str, ClientReport] = dict()
 
         self.client_counter = 0
+        self.saved = False
 
     def _reset(self):
         self.clients = dict()
@@ -132,6 +133,7 @@ class State:
         self.reports = dict()
 
         self.client_counter = 0
+        self.saved = False
 
     async def next_client_id(self):
         id = self.client_counter
@@ -188,18 +190,19 @@ class State:
         async with self.lock:
             username = self.usernames[ip_id]
             self.reports[username] = report
-            return self.all_clients_have_uploaded
+            if self.all_clients_have_uploaded and not self.saved:
+                self.saved = True
+                await self.save_report()
 
     async def save_report(self):
         ips = {v: k.split("#")[0] for k, v in self.usernames.items()}
-        async with self.lock:
-            report = Report(
-                scenario=self.scenario,
-                ipAddresses=ips,
-                clients=self.clients,
-                reports=self.reports,
-            )
-            self.writer.write(self.scenario.report, report)
+        report = Report(
+            scenario=self.scenario,
+            ipAddresses=ips,
+            clients=self.clients,
+            reports=self.reports,
+        )
+        self.writer.write(self.scenario.report, report)
 
     async def _ready(self, ip: str):
         async with self.lock:
