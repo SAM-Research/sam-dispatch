@@ -50,7 +50,7 @@ async def sync(request: Request):
 @app.post("/upload")
 async def upload(request: Request, report: ClientReport):
     _id = auth(request)
-    state.report(_id, report)
+    await state.report(_id, report)
 
 
 @app.get("/health")
