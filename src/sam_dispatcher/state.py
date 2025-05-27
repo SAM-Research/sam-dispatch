@@ -7,6 +7,8 @@ import time
 from pathlib import Path
 from asyncio import Lock
 import asyncio
+import numpy as np
+from copy import deepcopy
 
 
 class Scenario(BaseModel):
@@ -23,6 +25,7 @@ class Scenario(BaseModel):
     reply_rate_range: Tuple[int, int] = Field(alias="replyRateRange")
     reply_probability: tuple[float, float] = Field(alias="replyProbability")
     stale_reply_range: tuple[int, int] = Field(alias="staleReplyRange")
+    friend_alpha: float = Field(alias="friendAlpha")
     report: str = Field(alias="report", default="report.json")
 
 
@@ -43,7 +46,7 @@ class Client(BaseModel):
     denim_probability: float = Field(alias="denimProbability")
     reply_probability: float = Field(alias="replyProbability")
     stale_reply: int = Field(alias="staleReply")
-    friends: Dict[str, Friend]
+    friends: Dict[str, Friend] = Field()
 
 
 class MessageLog(BaseModel):
@@ -154,7 +157,9 @@ class State:
     @property
     def all_clients_have_uploaded(self):
         usernames = set(self.usernames.values())
-        return all(user in usernames for user in self.reports)
+        has_reports = len(self.reports) == len(self.clients)
+
+        return all(user in usernames for user in self.reports) and has_reports
 
     async def set_account_id(self, ip_id: str, account_id: AccountId):
         async with self.lock:
@@ -185,15 +190,16 @@ class State:
             self.reports[username] = report
             return self.all_clients_have_uploaded
 
-    def save_report(self):
+    async def save_report(self):
         ips = {v: k.split("#")[0] for k, v in self.usernames.items()}
-        report = Report(
-            scenario=self.scenario,
-            ipAddresses=ips,
-            clients=self.clients,
-            reports=self.reports,
-        )
-        self.writer.write(self.scenario.report, report)
+        async with self.lock:
+            report = Report(
+                scenario=self.scenario,
+                ipAddresses=ips,
+                clients=self.clients,
+                reports=self.reports,
+            )
+            self.writer.write(self.scenario.report, report)
 
     async def _ready(self, ip: str):
         async with self.lock:
@@ -302,13 +308,40 @@ class State:
             )
             clients[name].friends[friend_name] = friend
 
+        # create weighted friends
         for client in clients.values():
             friend_amount = len(client.friends)
-            samples = [random.random() for _ in range(friend_amount)]
-            total = sum(samples)
-            frequencies = [x / total for x in samples]
-            for freq, friend in zip(frequencies, client.friends.values()):
-                friend.frequency = freq
+
+            # dirichlet distribution for skewed friends
+            samples = np.random.dirichlet([self.scenario.friend_alpha] * friend_amount)
+            samples = [float(x) for x in samples]
+
+            for freq, ab_friend in zip(samples, client.friends.values()):
+                ab_friend.frequency = freq
+
+        # make mutual friendships
+        mutuals: dict[tuple, float] = dict()
+        for client in clients.values():
+            for f, ab_friend in client.friends.items():
+                pair = tuple(sorted((client.username, f)))
+                if pair in mutuals:
+                    continue
+                ab_freq = ab_friend.frequency
+                ba_friend = clients[f].friends[client.username]
+                ba_freq = ba_friend.frequency
+
+                mutual = (ab_freq + ba_freq) / 2
+                mutuals[pair] = mutual
+
+        #  Normalize all mutual weights globally
+        total = sum(mutuals.values())
+        for pair in mutuals:
+            mutuals[pair] /= total
+
+        # Assign normalized frequency to both A and B
+        for (a, b), freq in mutuals.items():
+            clients[a].friends[b].frequency = freq
+            clients[b].friends[a].frequency = freq
 
     def _get_sizes_and_rate(self):
         min_rate, max_rate = self.scenario.send_rate_range

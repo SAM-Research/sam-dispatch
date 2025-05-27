@@ -25,6 +25,7 @@ scenarios = [
         replyRateRange=(1, 2),
         replyProbability=(0.5, 0.95),
         staleReplyRange=(1, 1),
+        friendAlpha=0.3,
     ),
 ]
 
@@ -88,12 +89,15 @@ async def test_client_amount_persists(scenario: Scenario):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scenario", scenarios)
-async def test_client_friend_freqs_add_to_one(scenario: Scenario):
+async def test_client_freqs_add_to_one(scenario: Scenario):
     state = State(scenario)
     await state.init_state()
+    total = 0
     for client in state.clients.values():
-        total = sum(f.frequency for f in client.friends.values())
-        assert math.isclose(total, 1.0, rel_tol=1e-9), f"Sum was {total}"
+        total += sum(f.frequency for f in client.friends.values())
+    # sums all client frequencies, friends have two pairs of the same
+    # freq leading the total to be two times higher than actual
+    assert math.isclose(total / 2, 1.0, rel_tol=1e-9), f"Sum was {total}"
 
 
 class TestReportWriter:
@@ -135,7 +139,7 @@ async def test_ready_to_save(scenario: Scenario):
         )
         expected_report.reports[user] = report
         await state.report(ip, report)
-    state.save_report()
+    await state.save_report()
     report = writer.report
     assert report is not None
     assert report == expected_report

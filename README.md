@@ -39,6 +39,7 @@ options:
   "sendRateRange": [1, 5], // how fast a client will send a message, each client gets a random send rate, faster send rate will have less data in the messages and vice versa
   "replyRateRange": [1, 2], // how fast a client will reply to a message
   "staleReplyRange": [1, 1], // ticks before a client wont reply to a message
+  "friendAlpha": 0.3, // seed the alpha in dirichlet distribution: [friendAlpha] * len(friends)
   "report": "report.json" // final report is saved to report/<name>.json
 }
 ```

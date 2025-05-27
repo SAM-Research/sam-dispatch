@@ -51,7 +51,7 @@ async def sync(request: Request):
 async def upload(request: Request, report: ClientReport):
     _id = auth(request)
     if await state.report(_id, report):
-        state.save_report()
+        await state.save_report()
 
 
 @app.get("/health")
