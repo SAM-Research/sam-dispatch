@@ -23,14 +23,7 @@ options:
   "address": "127.0.0.1:8080", // port to run dispatcher on
   "type": "sam", // whether to use sam or denim infrastructure (valid: sam, denim)
   "clients": 1, // how many clients to register
-  /* How many groups of clients that should communicate.
-   Each group has at least one denim client that communicates with a denim client from another group.
-   No other clients communicate across groups.
-   groups is a distribution so if you want 3 groups you would set it up as:
-   [0.3, 0.4, 0.3]
-   this creates 3 groups where two have 30% of the client population and one have 40% of the client population
-   */
-  "groups": [1],
+  "groups": 1, // clients divided equally between groups
   "tickMillis": 1000, // how many milliseconds one tick corresponds to
   "durationTicks": 500, // time of experiment
   "messageSizeRange": [200, 500], // the size range clients will be sending messages in

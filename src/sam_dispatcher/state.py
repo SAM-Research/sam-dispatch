@@ -16,7 +16,7 @@ class Scenario(BaseModel):
     type: str = Field()
     address: str = Field(alias="address", default="127.0.0.1:8080")
     clients: int = Field(alias="clients")
-    groups: List[float] = Field(alias="groups")
+    groups: int = Field(alias="groups")
     tick_millis: int = Field(alias="tickMillis")
     duration_ticks: int = Field(alias="durationTicks")
     message_size_range: Tuple[int, int] = Field(alias="messageSizeRange")
@@ -104,11 +104,6 @@ class State:
         self.writer = writer
         if self.writer is None:
             self.writer = FsReportWriter()
-
-        if len(self.scenario.groups) == 0:
-            self.scenario.groups.append(1.0)
-        if sum(self.scenario.groups) != 1:
-            raise RuntimeError("Groups must add up to 1")
 
         self.clients: dict[str, Client] = dict()
         self.free_clients: set[str] = set()
@@ -271,7 +266,9 @@ class State:
         names = set(clients.keys())
         client_amount = len(names)
         groups: list[list[str]] = []
-        for fraction in self.scenario.groups:
+
+        fraction = client_amount / self.scenario.groups / client_amount
+        for _ in range(self.scenario.groups):
             group_amount = math.floor(client_amount * fraction)
             current_group = [names.pop() for _ in range(group_amount)]
             groups.append(current_group)

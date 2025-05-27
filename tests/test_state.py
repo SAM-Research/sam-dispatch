@@ -16,7 +16,7 @@ scenarios = [
         name="test",
         type="denim-on-sam",
         clients=10,
-        groups=[0.5, 0.5],
+        groups=2,
         tickMillis=10,
         durationTicks=10,
         messageSizeRange=(10, 20),
@@ -55,7 +55,7 @@ async def test_can_get_client(scenario: Scenario):
 async def test_groups_have_denim_connection(scenario: Scenario):
     state = State(scenario)
     await state.init_state()
-    groups = len(state.scenario.groups)
+    groups = state.scenario.groups
     count = 0
     for c in state.clients.values():
         for f in c.friends.values():
